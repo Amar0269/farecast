@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "source": "yatra",
+    "origin": "BLR",
+    "destination": "HYD",
+    "travel_date": "2026-10-17",
+    "collection_timestamp": "2026-09-17T07:34:27.591834+00:00",
+    "status": "SOURCE_BLOCKED",
+    "observation_count": 0,
+    "error_message": "Access blocked with HTTP status 403"
+  },
+  "raw_payload": "Request to GET /air-search/dom2/trigger on flight.yatra.com not allowed by policy\n"
+}

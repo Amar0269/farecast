@@ -121,8 +121,9 @@ class DataCleaner:
         except Exception:
             pass
 
-        # 6. Update Status
+        # 6. Update Status & Missing Fields
         if obs.cleaning_status != "INVALID":
             obs.cleaning_status = "CLEAN" if obs.total_fare is not None else "WARNING"
 
+        obs.update_missing_fields()
         return obs

@@ -1,0 +1,51 @@
+{
+  "run_id": "run_20260917_073427",
+  "collection_timestamps": {
+    "start": "2026-09-17T07:34:27.535091+00:00",
+    "end": "2026-09-17T07:34:27.602479+00:00"
+  },
+  "sources": [
+    "yatra"
+  ],
+  "routes": [
+    "DEL-BOM",
+    "DEL-BLR",
+    "BOM-BLR",
+    "DEL-CCU",
+    "BLR-HYD",
+    "MAA-DEL"
+  ],
+  "windows": [
+    "T+1",
+    "T+7",
+    "T+15",
+    "T+30",
+    "T+45"
+  ],
+  "searches_attempted": 30,
+  "successful_searches": 0,
+  "blocked_searches": 30,
+  "failed_searches": 0,
+  "no_result_searches": 0,
+  "total_real_observations_collected": 0,
+  "duplicate_count": 0,
+  "outlier_count": 0,
+  "per_route_counts": {
+    "DEL-BOM": 0,
+    "DEL-BLR": 0,
+    "BOM-BLR": 0,
+    "DEL-CCU": 0,
+    "BLR-HYD": 0,
+    "MAA-DEL": 0
+  },
+  "per_window_counts": {
+    "T+1": 0,
+    "T+7": 0,
+    "T+15": 0,
+    "T+30": 0,
+    "T+45": 0
+  },
+  "per_source_counts": {
+    "yatra": 0
+  }
+}

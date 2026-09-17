@@ -109,14 +109,8 @@ class FareObservation(BaseModel):
             raise ValueError(f"Invalid IATA airport code: {v}")
         return v_str
 
-    @model_validator(mode="after")
-    def populate_computed_fields(self) -> "FareObservation":
-        # Ensure route matches origin-destination
-        expected_route = f"{self.origin}-{self.destination}"
-        if self.route != expected_route:
-            self.route = expected_route
-
-        # Track missing fields dynamically
+    def update_missing_fields(self) -> List[str]:
+        """Recomputes list of missing/null fields dynamically."""
         field_checks = [
             ("departure_time", self.departure_time),
             ("arrival_time", self.arrival_time),
@@ -132,9 +126,18 @@ class FareObservation(BaseModel):
             ("seats_available", self.seats_available),
             ("advance_purchase_days", self.advance_purchase_days),
         ]
-
         missing = [fname for fname, fval in field_checks if fval is None]
         self.missing_fields = sorted(list(set(missing)))
+        return self.missing_fields
+
+    @model_validator(mode="after")
+    def populate_computed_fields(self) -> "FareObservation":
+        # Ensure route matches origin-destination
+        expected_route = f"{self.origin}-{self.destination}"
+        if self.route != expected_route:
+            self.route = expected_route
+
+        self.update_missing_fields()
         return self
 
     def to_csv_dict(self) -> dict:

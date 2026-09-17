@@ -106,25 +106,35 @@ def export_processed_data(
     """Exports processed observations to standardized CSV and JSON datasets."""
     os.makedirs(processed_dir, exist_ok=True)
     date_slug = datetime.now(timezone.utc).strftime("%Y%m%d")
-    csv_path = os.path.join(processed_dir, f"{export_prefix}_{date_slug}.csv")
-    json_path = os.path.join(processed_dir, f"{export_prefix}_{date_slug}.json")
+    
+    # Standard primary dataset files required by Member 2 / backend
+    std_csv_path = os.path.join(processed_dir, "airfare_observations.csv")
+    std_json_path = os.path.join(processed_dir, "airfare_observations.json")
+    
+    # Timestamped archive files
+    archive_csv_path = os.path.join(processed_dir, f"{export_prefix}_{date_slug}.csv")
+    archive_json_path = os.path.join(processed_dir, f"{export_prefix}_{date_slug}.json")
 
     schema_fields = list(FareObservation.model_fields.keys())
 
-    write_header = not os.path.exists(csv_path)
-    with open(csv_path, "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=schema_fields)
-        if write_header:
-            writer.writeheader()
-        for obs in observations:
-            writer.writerow(obs.to_csv_dict())
+    # Write primary CSV
+    for path in (std_csv_path, archive_csv_path):
+        write_header = not os.path.exists(path) or os.path.getsize(path) == 0
+        with open(path, "w" if write_header else "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=schema_fields)
+            if write_header:
+                writer.writeheader()
+            for obs in observations:
+                writer.writerow(obs.to_csv_dict())
 
+    # Write primary JSON
     json_records = [obs.model_dump() for obs in observations]
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(json_records, f, indent=2)
+    for path in (std_json_path, archive_json_path):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(json_records, f, indent=2)
 
-    logger.info(f"Clean processed dataset exported: CSV={csv_path}, JSON={json_path}")
-    return {"csv": csv_path, "json": json_path}
+    logger.info(f"Clean processed dataset exported: CSV={std_csv_path}, JSON={std_json_path}")
+    return {"csv": std_csv_path, "json": std_json_path}
 
 
 def collect_fares(
@@ -210,35 +220,40 @@ def collect_fares(
 def run_matrix_collection(config_path: str = "config/routes.yaml", target_source: Optional[str] = None) -> List[FareObservation]:
     """
     Executes collection across all routes and advance purchase windows configured in routes.yaml.
-    Generates a collection summary manifest file in data/processed/.
+    Generates a comprehensive collection summary manifest file in data/processed/collection_runs/.
     """
+    start_time = datetime.now(timezone.utc)
+    run_id = f"run_{start_time.strftime('%Y%m%d_%H%M%S')}"
+
     config = load_config(config_path)
     routes = config.get("routes", [{"origin": "DEL", "destination": "BOM"}])
     advance_days = config.get("advance_purchase_days", [1, 7, 15, 30, 45])
     sources = [target_source] if target_source else config.get("sources", ["yatra"])
 
-    today = datetime.now(timezone.utc)
     all_observations: List[FareObservation] = []
-    summary_stats = {
-        "timestamp": today.isoformat(),
-        "total_queries": 0,
-        "successful_queries": 0,
-        "blocked_queries": 0,
-        "total_observations_collected": 0,
-        "source_breakdown": {}
-    }
+
+    per_route_counts = {f"{r['origin']}-{r['destination']}": 0 for r in routes}
+    per_window_counts = {f"T+{d}": 0 for d in advance_days}
+    per_source_counts = {src: 0 for src in sources}
+
+    searches_attempted = 0
+    successful_searches = 0
+    blocked_searches = 0
+    failed_searches = 0
+    no_result_searches = 0
 
     for src in sources:
-        summary_stats["source_breakdown"][src] = {"attempted": 0, "successful": 0, "observations": 0}
         for route in routes:
             orig = route["origin"]
             dest = route["destination"]
-            windows = calculate_travel_dates(today, advance_days)
+            route_str = f"{orig}-{dest}"
+            windows = calculate_travel_dates(start_time, advance_days)
+
             for win in windows:
                 t_date = win["travel_date"]
-                summary_stats["total_queries"] += 1
-                summary_stats["source_breakdown"][src]["attempted"] += 1
-                
+                win_str = win["window"]
+                searches_attempted += 1
+
                 obs_list = collect_fares(
                     source=src,
                     origin=orig,
@@ -247,22 +262,60 @@ def run_matrix_collection(config_path: str = "config/routes.yaml", target_source
                 )
 
                 if obs_list:
+                    successful_searches += 1
                     all_observations.extend(obs_list)
-                    summary_stats["successful_queries"] += 1
-                    summary_stats["total_observations_collected"] += len(obs_list)
-                    summary_stats["source_breakdown"][src]["successful"] += 1
-                    summary_stats["source_breakdown"][src]["observations"] += len(obs_list)
+                    count = len(obs_list)
+                    per_route_counts[route_str] = per_route_counts.get(route_str, 0) + count
+                    per_window_counts[win_str] = per_window_counts.get(win_str, 0) + count
+                    per_source_counts[src] = per_source_counts.get(src, 0) + count
                 else:
-                    summary_stats["blocked_queries"] += 1
+                    blocked_searches += 1
 
-    manifest_path = f"data/processed/manifest_{today.strftime('%Y%m%d_%H%M%S')}.json"
-    os.makedirs("data/processed", exist_ok=True)
+    end_time = datetime.now(timezone.utc)
+
+    # Post-process all collected observations (deduplicate across full matrix & flag outliers)
+    cleaned_matrix = [DataCleaner.clean_observation(obs) for obs in all_observations]
+    deduped_matrix = DataValidator.deduplicate(cleaned_matrix)
+    final_matrix = DataValidator.flag_outliers(deduped_matrix)
+
+    duplicate_count = sum(1 for obs in final_matrix if obs.duplicate_flag)
+    outlier_count = sum(1 for obs in final_matrix if obs.outlier_flag)
+
+    manifest_data = {
+        "run_id": run_id,
+        "collection_timestamps": {
+            "start": start_time.isoformat(),
+            "end": end_time.isoformat()
+        },
+        "sources": sources,
+        "routes": [f"{r['origin']}-{r['destination']}" for r in routes],
+        "windows": [f"T+{d}" for d in advance_days],
+        "searches_attempted": searches_attempted,
+        "successful_searches": successful_searches,
+        "blocked_searches": blocked_searches,
+        "failed_searches": failed_searches,
+        "no_result_searches": no_result_searches,
+        "total_real_observations_collected": len(final_matrix),
+        "duplicate_count": duplicate_count,
+        "outlier_count": outlier_count,
+        "per_route_counts": per_route_counts,
+        "per_window_counts": per_window_counts,
+        "per_source_counts": per_source_counts
+    }
+
+    manifest_dir = "data/processed/collection_runs"
+    os.makedirs(manifest_dir, exist_ok=True)
+    manifest_path = os.path.join(manifest_dir, f"manifest_{start_time.strftime('%Y%m%d_%H%M%S')}.json")
+
     with open(manifest_path, "w", encoding="utf-8") as f:
-        json.dump(summary_stats, f, indent=2)
+        json.dump(manifest_data, f, indent=2)
+
+    # Also update primary processed dataset
+    export_processed_data("data/processed", final_matrix)
 
     logger.info(f"Matrix collection completed. Manifest saved to {manifest_path}")
-    logger.info(f"Total Observations Collected: {summary_stats['total_observations_collected']}")
-    return all_observations
+    logger.info(f"Total Observations Collected: {len(final_matrix)}")
+    return final_matrix
 
 
 def main():
