@@ -1,0 +1,69 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Airline {
+  id           Int               @id @default(autoincrement())
+  name         String            @unique
+  code         String?           @unique
+  observations FareObservation[]
+}
+
+model Airport {
+  id             Int     @id @default(autoincrement())
+  city           String
+  code           String  @unique
+  routesOrigin   Route[] @relation("OriginAirport")
+  routesDest     Route[] @relation("DestAirport")
+}
+
+model Route {
+  id             Int               @id @default(autoincrement())
+  originCode     String
+  destinationCode String
+  origin         Airport           @relation("OriginAirport", fields: [originCode], references: [code])
+  destination    Airport           @relation("DestAirport", fields: [destinationCode], references: [code])
+  observations   FareObservation[]
+  routeIndices   RouteIndex[]
+  @@unique([originCode, destinationCode])
+}
+
+model FareObservation {
+  id             Int      @id @default(autoincrement())
+  source         String
+  airlineId      Int
+  routeId        Int
+  flight_number  String
+  travel_date    DateTime
+  departure_time String
+  arrival_time   String
+  cabin_class    String
+  stops          Int
+  fare           Float
+  currency       String
+  collected_at   DateTime @default(now())
+
+  airline        Airline  @relation(fields: [airlineId], references: [id])
+  route          Route    @relation(fields: [routeId], references: [id])
+}
+model RouteIndex {
+  id          Int      @id @default(autoincrement())
+  routeId     Int
+  date        DateTime
+  index_value Float
+  created_at  DateTime @default(now())
+
+  route       Route    @relation(fields: [routeId], references: [id])
+}
+
+model NationalIndex {
+  id          Int      @id @default(autoincrement())
+  date        DateTime
+  index_value Float
+  created_at  DateTime @default(now())
+}
