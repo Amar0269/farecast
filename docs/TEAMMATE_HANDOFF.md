@@ -12,19 +12,26 @@
 |---|---|---|---|
 | **Production CSV** | [`data-collector/data/processed/airfare_observations.csv`](file:///Users/amar/farecast/data-collector/data/processed/airfare_observations.csv) | **604** | Primary 32-field dataset formatted for PostgreSQL COPY / pandas import |
 | **Production JSON** | [`data-collector/data/processed/airfare_observations.json`](file:///Users/amar/farecast/data-collector/data/processed/airfare_observations.json) | **604** | Primary 32-field JSON array for API / backend consumption |
+| **Route Catalog CSV** | [`data-collector/data/processed/route_catalog.csv`](file:///Users/amar/farecast/data-collector/data/processed/route_catalog.csv) | **630** | Full Indian Domestic Route Catalog across 43 airports |
+| **Route Catalog JSON** | [`data-collector/data/processed/route_catalog.json`](file:///Users/amar/farecast/data-collector/data/processed/route_catalog.json) | **630** | Discovered domestic route catalog JSON |
 | **Run Manifest** | [`data-collector/data/processed/collection_runs/manifest_20260917_073450.json`](file:///Users/amar/farecast/data-collector/data/processed/collection_runs/) | **1** | Full matrix collection summary audit trail |
 
 ---
 
-## 📊 Dataset Breakdown
+## 📊 Dataset & Route Catalog Breakdown
 
+- **Route Discovery Engine**:
+  - **Discovered Indian Domestic Airports**: 43 airports
+  - **Discovered Route Catalog**: 630 directional routes (`DEL-BOM`, `BOM-DEL`, etc.)
+  - **SIH Representative Reference Routes**: 6 benchmark routes (`DEL-BOM`, `DEL-BLR`, `BOM-BLR`, `DEL-CCU`, `BLR-HYD`, `MAA-DEL`)
+  - **Full Discovered Route Universe**: 630 directional routes
 - **Total Real Observations**: **604**
 - **Unique Observations**: **604**
 - **Duplicate Count**: **0**
 - **Outlier Count**: **8** (IQR flagged)
 - **Collection Timestamp**: `2026-09-17T06:06:35Z`
 - **Source Availability**:
-  - `Yatra`: **SUCCESS** (604 observations)
+  - `Yatra`: **SUCCESS** (604 observations collected; all-flight extraction supported)
   - `IndiGo`, `EaseMyTrip`, `Ixigo`, `Air India`, `Air India Express`, `Akasa Air`, `SpiceJet`, `Cleartrip`, `Goibibo`, `MakeMyTrip`: **`SOURCE_BLOCKED`** (HTTP 403 / Cloudflare / Akamai WAF access control)
 
 ### Observations Per Airline
@@ -35,7 +42,7 @@
 - **SpiceJet**: 6
 
 ### Observations Per Route
-- **DEL-BOM**: 604
+- **DEL-BOM**: 604 (Historical production dataset preserved)
 
 ### Observations Per Advance Purchase Window
 - **T+30**: 604
@@ -83,12 +90,21 @@
 
 ## 🗄️ PostgreSQL Database Import Guide (Member 2)
 
-Member 2 can immediately load `airfare_observations.csv` into PostgreSQL using the following DDL & COPY script:
+Member 2 can immediately load `airfare_observations.csv` and `route_catalog.csv` into PostgreSQL using the following DDL & COPY script:
 
 ```sql
--- 1. Create Tablespace & Enum Types
-CREATE TYPE collection_status_enum AS ENUM (
-    'RAW', 'CLEAN', 'WARNING', 'INVALID'
+-- 1. Create Route Catalog Table
+CREATE TABLE route_catalog (
+    route_id VARCHAR(10) PRIMARY KEY,
+    route VARCHAR(10) NOT NULL,
+    origin VARCHAR(64) NOT NULL,
+    origin_code CHAR(3) NOT NULL,
+    destination VARCHAR(64) NOT NULL,
+    destination_code CHAR(3) NOT NULL,
+    domestic BOOLEAN DEFAULT TRUE,
+    source VARCHAR(32) NOT NULL,
+    discoverability_status VARCHAR(32) NOT NULL,
+    discovered_at TIMESTAMPTZ NOT NULL
 );
 
 -- 2. Create Airfare Observations Table
@@ -133,17 +149,21 @@ CREATE INDEX idx_fares_airline ON airfare_observations (airline);
 CREATE INDEX idx_fares_window ON airfare_observations (advance_purchase_window);
 
 -- 4. Execute Fast CSV COPY Import
+\copy route_catalog FROM 'data-collector/data/processed/route_catalog.csv' WITH (FORMAT csv, HEADER true, DELIMITER ',');
 \copy airfare_observations FROM 'data-collector/data/processed/airfare_observations.csv' WITH (FORMAT csv, HEADER true, DELIMITER ',');
 ```
 
 ---
 
-## ⚙️ Cleaning, Normalization & Quality Rules
+## ⚡ Execution Commands
 
-1. **Deduplication Logic**:
-   - Unique key generated via SHA-256 of `source|airline|flight_number|origin|destination|travel_date|departure_time|fare_class`.
-   - Duplicates are marked with `duplicate_flag = true` (never dropped).
-2. **Outlier Detection**:
-   - Uses Interquartile Range (IQR) on `total_fare`: Fares outside $[Q_1 - 1.5 \times IQR, Q_3 + 1.5 \times IQR]$ set `outlier_flag = true`.
-3. **Missing Value Integrity**:
-   - Unavailable monetary breakdown fields (e.g. `convenience_fee`) remain `NULL` rather than fake `0` values to avoid distorting CPI price index calculations.
+```bash
+# Discover routes and build route catalog
+python pipelines/bulk_collector.py --discover-routes
+
+# Run resumable bulk collection with pacing
+python pipelines/bulk_collector.py --run-bulk --limit-routes 50 --limit-windows 5 --delay 0.3 --source yatra
+
+# Execute offline unit tests
+pytest tests/
+```

@@ -8,6 +8,9 @@ This repository contains the complete, production-ready Data Collection and Data
 
 ## 🌟 Key Architecture & Highlights
 
+- **Yatra Route Discovery Engine**: Dynamically discovers and builds the complete **Indian Domestic Route Catalog** (630 directional routes across 43 airports) rather than limiting collection to hardcoded routes.
+- **Resumable Bulk Collection Engine**: Paced, rate-limited batch collection pipeline with state checkpointing (`pipelines/bulk_collector.py`).
+- **All-Flight Extraction Policy**: Collects **ALL** returned flight/fare observations per search (base fare, taxes, fees, total fare).
 - **Standardized 32-Field Schema**: Built on Pydantic `FareObservation` schema covering identification, flight details, price breakdowns, availability, lead-time windows, raw audit trails, and data quality flags.
 - **Source-Agnostic Adapter Pattern**: Unified `BaseFareSource` abstract interface supporting **11 target SIH sources**:
   1. **IndiGo** (`scrapers/indigo.py`)
@@ -21,12 +24,8 @@ This repository contains the complete, production-ready Data Collection and Data
   9. **Cleartrip** (`scrapers/cleartrip.py`)
   10. **Goibibo** (`scrapers/goibibo.py`)
   11. **MakeMyTrip** (`scrapers/makemytrip.py`)
-- **Compliant Access & Robust Block Handling**: Strictly uses permitted HTTP/REST request mechanisms without evasion or anti-bot bypass. Blocked requests (WAF/Cloudflare/Akamai HTTP 403/429/503) are gracefully trapped as `CollectionStatus.SOURCE_BLOCKED` with preserved raw payloads.
-- **Data Cleaning & Normalization**:
-  - `DataNormalizer`: Canonical airline names, 3-letter IATA uppercase airport codes, ISO 8601 dates (`YYYY-MM-DD`), 24-hour time format (`HH:MM`), and numeric currency values.
-  - `DataCleaner`: Computes lead-time days and maps into standard advance purchase windows (`T+1`, `T+7`, `T+15`, `T+30`, `T+45`, `Other`).
-  - `DataValidator`: Deterministic SHA-256 deduplication within sources and statistical Interquartile Range (IQR) price outlier flagging without dropping dynamic fares.
-- **Storage & Export**: Preserves raw HTML/JSON responses in `data/raw/<source>/` with timestamps, and exports clean datasets to `data/processed/` in CSV and JSON formats.
+- **Compliant Access & Block Trapping**: Traps WAF/Cloudflare/Akamai blocks gracefully as `CollectionStatus.SOURCE_BLOCKED`.
+- **Data Cleaning & Quality**: Normalization, lead-time window mapping (`T+1`, `T+7`, `T+15`, `T+30`, `T+45`), SHA-256 deduplication, and IQR outlier flagging.
 
 ---
 
@@ -35,32 +34,28 @@ This repository contains the complete, production-ready Data Collection and Data
 ```
 farecast/
 ├── README.md                           # Root documentation & team integration guide
-├── docs/                               # Source investigation & block logs for all 11 sources
-│   ├── indigo-final-access-investigation.md
-│   ├── easemytrip-final-access-investigation.md
-│   ├── ixigo-final-access-investigation.md
-│   ├── yatra-source-investigation.md
-│   └── ...
+├── docs/                               # Documentation & source access reports
+│   ├── DATA_COLLECTION.md              # Pipeline, Route Discovery & Bulk Collector Guide
+│   ├── TEAMMATE_HANDOFF.md             # Member 2 PostgreSQL DDL & CSV import guide
+│   └── ...                             # Access reports for all 11 sources
 └── data-collector/                     # Main python subsystem
-    ├── config/
-    │   └── routes.yaml                 # 6 top routes + 5 advance purchase windows + 11 source configs
     ├── models/
     │   └── fare.py                     # 32-field FareObservation Pydantic model
     ├── scrapers/
-    │   ├── base.py                     # BaseFareSource & ScrapeResult models
-    │   ├── yatra.py                    # Yatra source adapter
-    │   ├── easemytrip.py               # EaseMyTrip source adapter
+    │   ├── route_discovery.py          # Yatra Indian domestic route discovery engine
+    │   ├── yatra.py                    # Yatra source adapter with all-flight parser
     │   └── ...                         # Adapters for all 11 sources
     ├── processors/
     │   ├── normalizer.py               # DataNormalizer (dates, times, airlines, fares, IATA)
-    │   ├── cleaner.py                  # DataCleaner (advance purchase lead time & cleaning status)
-    │   └── validator.py                # DataValidator (SHA-256 deduplication & IQR outlier flagging)
+    │   ├── cleaner.py                  # DataCleaner (advance purchase lead time & status)
+    │   └── validator.py                # DataValidator (SHA-256 deduplication & IQR flagging)
     ├── pipelines/
-    │   └── collect.py                  # End-to-end collection, matrix runner, & manifest generator
+    │   ├── bulk_collector.py           # Resumable bulk batch collector & CLI
+    │   └── collect.py                  # Single query & matrix collection runner
     ├── data/
-    │   ├── raw/                        # Timestamped raw scrape responses per source
-    │   └── processed/                  # Standardized CSV, JSON, and collection manifests
-    └── tests/                          # Complete unit & integration test suite (57 tests)
+    │   ├── raw/                        # Timestamped raw scrape responses
+    │   └── processed/                  # Route catalog, airfare observations, checkpoints, manifests
+    └── tests/                          # Complete unit & integration test suite (67 tests)
 ```
 
 ---
@@ -81,20 +76,20 @@ pip install -r requirements.txt
 ```bash
 pytest tests/
 ```
-*Expected result: 57/57 tests passing.*
+*Expected result: 67/67 tests passing.*
 
-### 3. Run Single Query Collection
-
-```bash
-python -m pipelines.collect --source yatra --origin DEL --destination BOM --travel-date 2026-10-17
-```
-
-### 4. Run Bulk Matrix Collection (All Configured Routes & Lead Times)
+### 3. Route Discovery & Catalog Generation
 
 ```bash
-python -m pipelines.collect --run-matrix --source yatra
+python pipelines/bulk_collector.py --discover-routes
 ```
-This runs collection across all 6 key routes (`DEL-BOM`, `DEL-BLR`, `BOM-BLR`, `DEL-CCU`, `BLR-HYD`, `MAA-DEL`) and 5 advance purchase dates (`T+1`, `T+7`, `T+15`, `T+30`, `T+45`), generating clean exports and a `manifest_<timestamp>.json` summary in `data/processed/`.
+Generates `data/processed/route_catalog.csv` (630 directional domestic routes).
+
+### 4. Resumable Bulk Collection Engine
+
+```bash
+python pipelines/bulk_collector.py --run-bulk --limit-routes 10 --limit-windows 5 --delay 0.3 --source yatra --resume
+```
 
 ---
 

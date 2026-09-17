@@ -1,0 +1,25 @@
+{
+  "run_id": "run_bulk_20260917_075211",
+  "collection_timestamps": {
+    "start": "2026-09-17T07:52:11.054442+00:00",
+    "end": "2026-09-17T07:52:12.009720+00:00"
+  },
+  "sources": [
+    "yatra"
+  ],
+  "routes_discovered": 2,
+  "routes_attempted": 2,
+  "searches_attempted": 4,
+  "successful_searches": 0,
+  "blocked_searches": 4,
+  "failed_searches": 0,
+  "no_result_searches": 0,
+  "total_real_observations_collected": 604,
+  "duplicate_count": 208,
+  "outlier_count": 8,
+  "per_route_counts": {},
+  "per_window_counts": {},
+  "per_source_counts": {
+    "yatra": 0
+  }
+}
