@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "source": "cleartrip",
+    "origin": "DEL",
+    "destination": "BOM",
+    "travel_date": "2026-10-17",
+    "collection_timestamp": "2026-09-17T06:22:47.931122Z",
+    "status": "SOURCE_BLOCKED",
+    "observation_count": 0,
+    "error_message": "Access blocked by Akamai WAF (HTTP status 403)"
+  },
+  "raw_payload": "Request to GET /flights/results on www.cleartrip.com not allowed by policy\n"
+}

@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "source": "indigo",
+    "origin": "DEL",
+    "destination": "BOM",
+    "travel_date": "2026-10-17",
+    "collection_timestamp": "2026-09-16T19:23:11.986789Z",
+    "status": "UNKNOWN_ERROR",
+    "observation_count": 0,
+    "error_message": "Playwright is not installed."
+  },
+  "raw_payload": null
+}

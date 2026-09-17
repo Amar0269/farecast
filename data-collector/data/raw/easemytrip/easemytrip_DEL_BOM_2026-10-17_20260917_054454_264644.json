@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "source": "easemytrip",
+    "origin": "DEL",
+    "destination": "BOM",
+    "travel_date": "2026-10-17",
+    "collection_timestamp": "2026-09-17T05:44:54.259168Z",
+    "status": "NO_RESULTS",
+    "observation_count": 0,
+    "error_message": "No flight cards (div.top-bottom-single-row) found in DOM."
+  },
+  "raw_payload": "<html><head></head><body></body></html>"
+}

@@ -1,0 +1,14 @@
+observation_id,source,source_url,collection_timestamp,airline,flight_number,origin,destination,route,travel_date,departure_time,arrival_time,stops,cabin_class,fare_class,fare_type,base_fare,taxes,user_development_fee,convenience_fee,other_fees,total_fare,currency,availability_status,seats_available,advance_purchase_days,advance_purchase_window,raw_fare_text,cleaning_status,outlier_flag,duplicate_flag,missing_fields
+8de57560-caec-4645-93b9-fef709164580,yatra,https://flight.yatra.com/air-search/dom2/trigger?type=O&origin=DEL&originCode=DEL&destination=BOM&destinationCode=BOM&flight_depart_date=17/10/2026&ADT=1&CHD=0&INF=0&class=Economy,2026-09-17T06:06:35.428899+00:00,SpiceJet,58 8723,DEL,BOM,DEL-BOM,2026-10-17,08:30,10:35,0,Economy,,,,,,,,24220.0,INR,available,,30,T+30,"<div class=""flightItem border-shadow pr"">
+ <div class=""flight-det table full-width clearfix"">
+  <div class=""pr fl-info v-aligm-t text-center pt-25 pl-24"">
+   <div class=""airline-holder clearfix i-b text-left flex"">
+    <div class=""i-b blank-label"">
+     <i class=""free-flow air-logo domAirLogo size-28 x58 blank-label"">
+     </i>
+    </div>
+    <div class=""fs-13 airline-name ml-5"">
+     <span class=""i-b blank-label"">
+      SpiceJet
+     </span>
+     <p class=""normal fs-11 font-lightgrey no-wrap fl",CLEAN,False,False,advance_purchase_days;base_fare;convenience_fee;fare_class;fare_type;other_fees;seats_available;taxes;user_development_fee

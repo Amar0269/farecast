@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "source": "goibibo",
+    "origin": "DEL",
+    "destination": "BOM",
+    "travel_date": "2026-10-17",
+    "collection_timestamp": "2026-09-17T06:35:08.435167Z",
+    "status": "SOURCE_BLOCKED",
+    "observation_count": 0,
+    "error_message": "Access blocked by Akamai Bot Manager (Challenge Validation page)"
+  },
+  "raw_payload": "Request to GET /flights/air-DEL-BOM-20261017--1-0-0-E-g on www.goibibo.com not allowed by policy\n"
+}

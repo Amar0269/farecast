@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "source": "indigo",
+    "origin": "DEL",
+    "destination": "BOM",
+    "travel_date": "2026-10-17",
+    "collection_timestamp": "2026-09-16T19:24:59.801795Z",
+    "status": "SOURCE_BLOCKED",
+    "observation_count": 0,
+    "error_message": "Access restricted by source WAF/Bot protection."
+  },
+  "raw_payload": "<!DOCTYPE html><html><head>\n\t<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n\t<style>\n\t\t\n\t\tbody {\n\t\t\tmargin :0;\n\t\t\tfont-family: arial;\n\t\t}\n\t\t.headerTop {\n\n\t\t\tborder-bottom:1px solid #ddd;\n\t\t\t    padding: 21px 0 21px;\n\t\t}\n\n\t\t.headerTop\ta {\n   \t\n   \t\t padding-left: 45px;\n\n\t\t}\n\n\t\t.headPage {\n\n\t\t    margin: 0px auto;\n\t\t\ttext-align: center;\n\t\t}\n\t\t.errorImg {\n\n\t\t\tmargin: 40px auto;\n\t\t    text-align: center;\n\t\t    max-width: 310px;\n\t\t    height: auto;\n\t\t    width: 100%;\n\n\t\t}\n\t\t.errParent,.moreInfo  {\n\n\t\t    margin: 0 auto;\n\t\t\ttext-align: center;\n\t\t}\n\t\n\t.moreInfo {\n\t\t\t\n\t\t    font-size: 16px;\n    \t\tmargin-top: 10px;\n\t}\n\n\t@media \n\t</style>\n</head>\n<body>\n\n<div>\n\t<div class=\"headerTop\">\n\t\t<a href=\"https://www.goindigo.in\">\n\t\t\t<img src=\"https://www.goindigo.in/akamfailoverpage/indigologo.svg\">\n\t\t</a>\n\t</div>\n\t\n\t<div class=\"errParent\">\n\t\t<h1 class=\"headPage\">Something went wrong</h1>\n\t\t<p class=\"moreInfo\">Please contact our customer support team.</p>\n\t</div>\n</div>\n\n</body></html>"
+}
