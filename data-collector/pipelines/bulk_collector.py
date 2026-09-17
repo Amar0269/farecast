@@ -70,11 +70,34 @@ def load_existing_production_observations() -> List[FareObservation]:
     return observations
 
 
+def validate_dataset_integrity(dataset: List[FareObservation], catalog: List[Dict[str, Any]]) -> bool:
+    """
+    Validates production dataset integrity.
+    Fails if:
+    - route does not match origin-destination
+    - route not in catalog
+    - DEL-BOM observations copied into another route
+    """
+    valid_routes = {item["route"] for item in catalog}
+    valid_routes.update({"DEL-BOM", "DEL-BLR", "BOM-BLR", "DEL-CCU", "BLR-HYD", "MAA-DEL"})
+
+    for obs in dataset:
+        expected_route = f"{obs.origin}-{obs.destination}"
+        if obs.route != expected_route:
+            raise ValueError(f"Integrity check failed: observation route {obs.route} != {expected_route}")
+
+        if obs.route not in valid_routes:
+            raise ValueError(f"Integrity check failed: route {obs.route} not in route catalog")
+
+    logger.info("Dataset Integrity Check Passed Successfully.")
+    return True
+
+
 def run_bulk_collection(
     limit_routes: Optional[int] = None,
     limit_windows: Optional[int] = None,
     resume: bool = True,
-    delay_seconds: float = 0.2,
+    delay_seconds: float = 0.1,
     source: str = "yatra"
 ) -> Dict[str, Any]:
     """
@@ -118,52 +141,75 @@ def run_bulk_collection(
     failed_searches = 0
     no_result_searches = 0
 
-    per_route_counts = {item["route"]: 0 for item in catalog}
-    per_window_counts = {f"T+{d}": 0 for d in advance_days}
-    per_source_counts = {source: 0}
+    per_search_records: List[Dict[str, Any]] = []
+    routes_successful: Set[str] = set()
+    routes_attempted: Set[str] = set()
 
-    logger.info(f"Starting bulk collection on {len(catalog)} routes and {len(advance_days)} advance purchase windows ({len(catalog)*len(advance_days)} total searches)...")
+    theoretical_searches = len(catalog) * len(advance_days)
+    logger.info(f"Starting bulk collection on {len(catalog)} routes and {len(advance_days)} windows ({theoretical_searches} theoretical searches)...")
 
     for item in catalog:
         orig = item["origin_code"]
         dest = item["destination_code"]
         route_str = item["route"]
+        routes_attempted.add(route_str)
 
         windows = calculate_travel_dates(start_time, advance_days)
 
         for win in windows:
             t_date = win["travel_date"]
             win_str = win["window"]
-            search_key = f"{source}|{orig}|{dest}|{t_date}"
+            lead_days = win["advance_days"]
+            search_key = f"{source}|{orig}|{dest}|{t_date}|{win_str}"
+            search_url = yatra_adapter._build_search_url(orig, dest, t_date)
 
             if resume and search_key in completed_keys:
-                logger.info(f"Skipping already completed search: {search_key}")
+                logger.info(f"[SKIPPED] Search already completed: {search_key}")
                 continue
 
             searches_attempted += 1
-            logger.info(f"[{searches_attempted}] Searching {source.upper()}: {route_str} on {t_date} ({win_str})...")
+            logger.info(f"[MATRIX] route={route_str} window={win_str} travel_date={t_date} url={search_url}")
 
             scrape_res = yatra_adapter.search(origin=orig, destination=dest, travel_date=t_date)
+            obs_count = 0
 
             if scrape_res.status == CollectionStatus.SUCCESS and scrape_res.observations:
                 successful_searches += 1
-                count = len(scrape_res.observations)
-                logger.info(f"Successfully collected {count} observations for {route_str} on {t_date}.")
+                obs_count = len(scrape_res.observations)
+                routes_successful.add(route_str)
+                logger.info(f"[SUCCESS] Collected {obs_count} observations for {route_str} on {t_date} ({win_str}).")
 
                 for obs in scrape_res.observations:
-                    cleaned_obs = DataCleaner.clean_observation(obs, collection_date_override=scrape_res.collection_timestamp)
+                    cleaned_obs = DataCleaner.clean_observation(
+                        obs,
+                        collection_date_override=scrape_res.collection_timestamp
+                    )
+                    cleaned_obs.advance_purchase_days = lead_days
+                    cleaned_obs.advance_purchase_window = win_str
+                    cleaned_obs.update_missing_fields()
                     collected_new_observations.append(cleaned_obs)
 
-                per_route_counts[route_str] = per_route_counts.get(route_str, 0) + count
-                per_window_counts[win_str] = per_window_counts.get(win_str, 0) + count
-                per_source_counts[source] = per_source_counts.get(source, 0) + count
             elif scrape_res.status == CollectionStatus.SOURCE_BLOCKED:
                 blocked_searches += 1
-                logger.warning(f"Search blocked for {route_str} on {t_date}.")
+                logger.warning(f"[BLOCKED] Search blocked for {route_str} on {t_date} ({win_str}).")
             elif scrape_res.status == CollectionStatus.NO_RESULTS:
                 no_result_searches += 1
+                logger.info(f"[NO_RESULTS] Zero flights returned for {route_str} on {t_date} ({win_str}).")
             else:
                 failed_searches += 1
+                logger.error(f"[FAILED] Search failed for {route_str} on {t_date} ({win_str}): {scrape_res.error_message}")
+
+            per_search_records.append({
+                "route": route_str,
+                "origin": orig,
+                "destination": dest,
+                "travel_date": t_date,
+                "advance_purchase_days": lead_days,
+                "advance_purchase_window": win_str,
+                "status": scrape_res.status.value,
+                "observation_count": obs_count,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            })
 
             CheckpointManager.save_checkpoint(search_key)
             if delay_seconds > 0:
@@ -175,12 +221,24 @@ def run_bulk_collection(
     deduped_all = DataValidator.deduplicate(cleaned_all)
     final_dataset = DataValidator.flag_outliers(deduped_all)
 
+    # Perform strict dataset integrity check
+    validate_dataset_integrity(final_dataset, catalog)
+
     # Export merged production dataset
     export_processed_data("data/processed", final_dataset)
 
     end_time = datetime.now(timezone.utc)
     duplicate_count = sum(1 for obs in final_dataset if obs.duplicate_flag)
     outlier_count = sum(1 for obs in final_dataset if obs.outlier_flag)
+
+    # Lead-time totals across final production dataset
+    lead_time_totals = {
+        "T+1": sum(1 for o in final_dataset if o.advance_purchase_window == "T+1"),
+        "T+7": sum(1 for o in final_dataset if o.advance_purchase_window == "T+7"),
+        "T+15": sum(1 for o in final_dataset if o.advance_purchase_window == "T+15"),
+        "T+30": sum(1 for o in final_dataset if o.advance_purchase_window == "T+30"),
+        "T+45": sum(1 for o in final_dataset if o.advance_purchase_window == "T+45"),
+    }
 
     manifest_data = {
         "run_id": run_id,
@@ -189,19 +247,22 @@ def run_bulk_collection(
             "end": end_time.isoformat()
         },
         "sources": [source],
-        "routes_discovered": len(catalog),
-        "routes_attempted": len(catalog),
+        "route_count": len(catalog),
+        "window_count": len(advance_days),
+        "theoretical_search_count": theoretical_searches,
         "searches_attempted": searches_attempted,
         "successful_searches": successful_searches,
         "blocked_searches": blocked_searches,
         "failed_searches": failed_searches,
         "no_result_searches": no_result_searches,
+        "routes_attempted": len(routes_attempted),
+        "routes_successful": len(routes_successful),
+        "routes_zero_successful": len(catalog) - len(routes_successful),
         "total_real_observations_collected": len(final_dataset),
         "duplicate_count": duplicate_count,
         "outlier_count": outlier_count,
-        "per_route_counts": {k: v for k, v in per_route_counts.items() if v > 0},
-        "per_window_counts": {k: v for k, v in per_window_counts.items() if v > 0},
-        "per_source_counts": per_source_counts
+        "lead_time_totals": lead_time_totals,
+        "per_search_records": per_search_records
     }
 
     manifest_dir = "data/processed/collection_runs"
@@ -225,7 +286,7 @@ def main():
     parser.add_argument("--limit-routes", type=int, default=None, help="Limit number of routes to process")
     parser.add_argument("--limit-windows", type=int, default=None, help="Limit number of advance purchase windows")
     parser.add_argument("--resume", action="store_true", default=True, help="Resume from last checkpoint")
-    parser.add_argument("--delay", type=float, default=0.2, help="Pacing delay between requests in seconds")
+    parser.add_argument("--delay", type=float, default=0.1, help="Pacing delay between requests in seconds")
     parser.add_argument("--source", type=str, default="yatra", help="Target source adapter")
 
     args = parser.parse_args()
