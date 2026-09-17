@@ -18,6 +18,7 @@ from scrapers.route_discovery import RouteDiscovery
 from processors.cleaner import DataCleaner
 from processors.validator import DataValidator
 from pipelines.collect import export_processed_data, calculate_travel_dates
+from pipelines.collect import load_config
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s - %(message)s")
 logger = logging.getLogger("BulkCollector")
@@ -79,7 +80,6 @@ def validate_dataset_integrity(dataset: List[FareObservation], catalog: List[Dic
     - DEL-BOM observations copied into another route
     """
     valid_routes = {item["route"] for item in catalog}
-    valid_routes.update({"DEL-BOM", "DEL-BLR", "BOM-BLR", "DEL-CCU", "BLR-HYD", "MAA-DEL"})
 
     for obs in dataset:
         expected_route = f"{obs.origin}-{obs.destination}"
@@ -97,7 +97,7 @@ def run_bulk_collection(
     limit_routes: Optional[int] = None,
     limit_windows: Optional[int] = None,
     resume: bool = True,
-    delay_seconds: float = 0.1,
+    delay_seconds: float = 2.0,
     source: str = "yatra"
 ) -> Dict[str, Any]:
     """
@@ -122,7 +122,9 @@ def run_bulk_collection(
     if limit_routes:
         catalog = catalog[:limit_routes]
 
-    advance_days = [1, 7, 15, 30, 45]
+    config = load_config()
+    advance_days = config.get("advance_purchase_days", [1, 7, 15, 30, 45])
+
     if limit_windows:
         advance_days = advance_days[:limit_windows]
 
@@ -133,7 +135,7 @@ def run_bulk_collection(
     existing_observations = load_existing_production_observations()
     collected_new_observations: List[FareObservation] = []
 
-    yatra_adapter = YatraSource()
+    yatra_adapter = YatraSource(config.get("source_settings", {}).get("yatra", {}))
 
     searches_attempted = 0
     successful_searches = 0
@@ -286,7 +288,7 @@ def main():
     parser.add_argument("--limit-routes", type=int, default=None, help="Limit number of routes to process")
     parser.add_argument("--limit-windows", type=int, default=None, help="Limit number of advance purchase windows")
     parser.add_argument("--resume", action="store_true", default=True, help="Resume from last checkpoint")
-    parser.add_argument("--delay", type=float, default=0.1, help="Pacing delay between requests in seconds")
+    parser.add_argument("--delay", type=float, default=2.0, help="Pacing delay between requests in seconds")
     parser.add_argument("--source", type=str, default="yatra", help="Target source adapter")
 
     args = parser.parse_args()

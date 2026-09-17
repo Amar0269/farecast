@@ -87,8 +87,20 @@ class DataCleaner:
         obs.airline = DataNormalizer.normalize_airline_name(obs.airline)
 
         # 3. Normalize Date & Times
+        col_timestamp = collection_date_override or obs.collection_timestamp
         try:
-            obs.travel_date = DataNormalizer.normalize_date(obs.travel_date)
+            collection_year = datetime.strptime(
+                col_timestamp.split("T")[0],
+                "%Y-%m-%d"
+            ).year
+        except Exception:
+            collection_year = datetime.now().year
+
+        try:
+            obs.travel_date = DataNormalizer.normalize_date(
+                obs.travel_date,
+                target_year=collection_year
+            )
         except Exception:
             obs.cleaning_status = "INVALID"
 
@@ -114,6 +126,7 @@ class DataCleaner:
 
         # 5. Handle Advance Purchase
         col_timestamp = collection_date_override or obs.collection_timestamp
+        
         try:
             days, window = cls.calculate_advance_purchase(col_timestamp, obs.travel_date)
             obs.advance_purchase_days = days

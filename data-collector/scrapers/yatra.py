@@ -12,7 +12,9 @@ import json
 import logging
 from typing import List, Dict, Any, Optional
 from bs4 import BeautifulSoup
+import time
 import httpx
+from playwright.sync_api import sync_playwright
 
 from models.fare import FareObservation, CollectionStatus
 from scrapers.base import BaseFareSource, ScrapeResult
@@ -34,7 +36,18 @@ class YatraSource(BaseFareSource):
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(source_name="yatra", config=config)
         self.base_url = self.config.get("base_url", "https://flight.yatra.com")
-        self.timeout = self.config.get("timeout_seconds", 30)
+        self.adults = self.config.get("adults", 1)
+        self.children = self.config.get("children", 0)
+        self.infants = self.config.get("infants", 0)
+        self.cabin_class = self.config.get("cabin_class", "Economy")
+        self.currency = self.config.get("currency", "INR")
+        self.timeout = self.config.get("timeout_seconds", 45)
+        self.max_retries = self.config.get("max_retries", 3)
+        self.retry_backoff_seconds = self.config.get("retry_backoff_seconds", 2)
+        self.playwright_enabled = self.config.get("playwright_enabled", True)
+        self.playwright_headless = self.config.get("playwright_headless", False)
+        self.playwright_wait_seconds = self.config.get("playwright_wait_seconds", 15)
+
 
     def _build_search_url(self, origin: str, destination: str, travel_date: str) -> str:
         """Builds the Yatra flight search URL."""
@@ -43,7 +56,11 @@ class YatraSource(BaseFareSource):
             f"{self.base_url}/air-search/dom2/trigger"
             f"?type=O&origin={origin}&originCode={origin}"
             f"&destination={destination}&destinationCode={destination}"
-            f"&flight_depart_date={url_date}&ADT=1&CHD=0&INF=0&class=Economy"
+            f"&flight_depart_date={url_date}"
+            f"&ADT={self.adults}"
+            f"&CHD={self.children}"
+            f"&INF={self.infants}"
+            f"&class={self.cabin_class}"
         )
 
     def search(
@@ -74,15 +91,117 @@ class YatraSource(BaseFareSource):
         }
 
         try:
-            with httpx.Client(timeout=self.timeout, follow_redirects=True, headers=headers) as client:
-                response = client.get(search_url)
+            with httpx.Client(
+                timeout=self.timeout,
+                follow_redirects=True,
+                headers=headers
+            ) as client:
+
+                response = None
+
+                for attempt in range(1, self.max_retries + 1):
+                    try:
+                        logger.info(
+                            f"Yatra request attempt {attempt}/{self.max_retries}"
+                        )
+
+                        response = client.get(search_url)
+
+                        # Retry temporary server/rate-limit responses.
+                        if response.status_code in (429, 503):
+                            logger.warning(
+                                f"Yatra returned HTTP {response.status_code} "
+                                f"on attempt {attempt}/{self.max_retries}"
+                            )
+
+                            if attempt < self.max_retries:
+                                retry_after = response.headers.get("Retry-After")
+
+                                if retry_after:
+                                    try:
+                                        wait_seconds = float(retry_after)
+                                    except ValueError:
+                                        wait_seconds = (
+                                            self.retry_backoff_seconds
+                                            * (2 ** (attempt - 1))
+                                        )
+                                else:
+                                    wait_seconds = (
+                                        self.retry_backoff_seconds
+                                        * (2 ** (attempt - 1))
+                                    )
+
+                                logger.info(
+                                    f"Waiting {wait_seconds:.1f}s before retrying Yatra"
+                                )
+                                time.sleep(wait_seconds)
+                                continue
+
+                        break
+
+                    except (
+                        httpx.ConnectTimeout,
+                        httpx.ReadTimeout,
+                        httpx.ConnectError,
+                        httpx.ReadError,
+                    ) as err:
+
+                        logger.warning(
+                            f"Yatra network error on attempt "
+                            f"{attempt}/{self.max_retries}: {err}"
+                        )
+
+                        if attempt >= self.max_retries:
+                            return ScrapeResult(
+                                source=self.source_name,
+                                origin=origin_code,
+                                destination=dest_code,
+                                travel_date=travel_date,
+                                status=CollectionStatus.NETWORK_ERROR,
+                                error_message=str(err)
+                            )
+
+                        wait_seconds = (
+                            self.retry_backoff_seconds
+                            * (2 ** (attempt - 1))
+                        )
+
+                        logger.info(
+                            f"Waiting {wait_seconds:.1f}s before retrying Yatra"
+                        )
+                        time.sleep(wait_seconds)
+
+                if response is None:
+                    return ScrapeResult(
+                        source=self.source_name,
+                        origin=origin_code,
+                        destination=dest_code,
+                        travel_date=travel_date,
+                        status=CollectionStatus.NETWORK_ERROR,
+                        error_message="No response received from Yatra"
+                    )
 
             raw_html = response.text
-            if response.status_code in (403, 429, 503):
-                logger.warning(f"Yatra HTTP status {response.status_code}.")
-                observations = self.parse_html(raw_html, origin_code, dest_code, travel_date)
+
+            # Explicit access-block response.
+            if response.status_code == 403:
+                logger.warning(
+                    f"Yatra access blocked with HTTP {response.status_code}"
+                )
+
+                observations = self.parse_html(
+                    raw_html,
+                    origin_code,
+                    dest_code,
+                    travel_date
+                )
+
                 if observations:
-                    logger.info(f"Successfully extracted {len(observations)} observations from response body despite HTTP {response.status_code}.")
+                    logger.info(
+                        f"Extracted {len(observations)} observations "
+                        f"despite HTTP 403."
+                    )
+
                     return ScrapeResult(
                         source=self.source_name,
                         origin=origin_code,
@@ -92,6 +211,7 @@ class YatraSource(BaseFareSource):
                         observations=observations,
                         raw_payload=raw_html
                     )
+
                 return ScrapeResult(
                     source=self.source_name,
                     origin=origin_code,
@@ -99,14 +219,67 @@ class YatraSource(BaseFareSource):
                     travel_date=travel_date,
                     status=CollectionStatus.SOURCE_BLOCKED,
                     raw_payload=raw_html,
-                    error_message=f"Access blocked with HTTP status {response.status_code}"
+                    error_message="Access blocked with HTTP status 403"
                 )
 
-            raw_html = response.text
-            observations = self.parse_html(raw_html, origin_code, dest_code, travel_date)
-            status = CollectionStatus.SUCCESS if observations else CollectionStatus.NO_RESULTS
+            # If retries were exhausted on 429/503.
+            if response.status_code in (429, 503):
+                return ScrapeResult(
+                    source=self.source_name,
+                    origin=origin_code,
+                    destination=dest_code,
+                    travel_date=travel_date,
+                    status=CollectionStatus.NETWORK_ERROR,
+                    raw_payload=raw_html,
+                    error_message=(
+                        f"Yatra returned HTTP {response.status_code} "
+                        f"after {self.max_retries} attempts"
+                    )
+                )
 
-            logger.info(f"Yatra search completed successfully. Extracted {len(observations)} observations.")
+            # Normal successful response.
+            observations = self.parse_html(
+                raw_html,
+                origin_code,
+                dest_code,
+                travel_date
+            )
+
+            # Yatra sometimes returns the flight schedule immediately,
+            # but fareDetails are loaded asynchronously by the browser.
+            # Only use Playwright when the normal HTTP parser found
+            # no observations and the response indicates polling.
+            if (
+                not observations
+                and "pollingIds" in raw_html
+                and "pollingDelay" in raw_html
+            ):
+                logger.info(
+                    "Yatra returned polling metadata without fare "
+                    "observations. Switching to Playwright."
+                )
+
+                browser_result = self._search_with_playwright(
+                    search_url,
+                    origin_code,
+                    dest_code,
+                    travel_date,
+                )
+
+                if browser_result.observations:
+                    return browser_result
+
+            status = (
+                CollectionStatus.SUCCESS
+                if observations
+                else CollectionStatus.NO_RESULTS
+            )
+
+            logger.info(
+                f"Yatra search completed. "
+                f"Extracted {len(observations)} observations."
+            )
+
             return ScrapeResult(
                 source=self.source_name,
                 origin=origin_code,
@@ -117,8 +290,9 @@ class YatraSource(BaseFareSource):
                 raw_payload=raw_html
             )
 
-        except Exception as err:
+        except httpx.RequestError as err:
             logger.error(f"Network error accessing Yatra: {err}")
+
             return ScrapeResult(
                 source=self.source_name,
                 origin=origin_code,
@@ -126,6 +300,125 @@ class YatraSource(BaseFareSource):
                 travel_date=travel_date,
                 status=CollectionStatus.NETWORK_ERROR,
                 error_message=str(err)
+            )
+
+        except Exception as err:
+            logger.exception(f"Unexpected error accessing Yatra: {err}")
+
+            return ScrapeResult(
+                source=self.source_name,
+                origin=origin_code,
+                destination=dest_code,
+                travel_date=travel_date,
+                status=CollectionStatus.NETWORK_ERROR,
+                error_message=str(err)
+            )
+
+    def _search_with_playwright(
+        self,
+        search_url: str,
+        origin: str,
+        destination: str,
+        travel_date: str,
+    ) -> ScrapeResult:
+        """
+        Fallback for Yatra responses where the initial HTTP request
+        contains flight schedules but fares are loaded by the page's
+        JavaScript after the initial response.
+        """
+
+        if not self.playwright_enabled:
+            return ScrapeResult(
+                source=self.source_name,
+                origin=origin,
+                destination=destination,
+                travel_date=travel_date,
+                status=CollectionStatus.NO_RESULTS,
+                error_message="Playwright fallback is disabled",
+            )
+
+        logger.info(
+            "Yatra fare data requires browser rendering. "
+            "Starting Playwright fallback."
+        )
+
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(
+                    headless=self.playwright_headless,
+                    args=[
+                        "--disable-http2",
+                        "--disable-quic",
+                    ],
+                )
+
+                page = browser.new_page(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/128.0.0.0 Safari/537.36"
+                    )
+                )
+
+                page.goto(
+                    search_url,
+                    wait_until="domcontentloaded",
+                    timeout=self.timeout * 1000,
+                )
+
+                logger.info(
+                    f"Waiting {self.playwright_wait_seconds}s "
+                    "for Yatra fare data to load."
+                )
+
+                page.wait_for_timeout(
+                    self.playwright_wait_seconds * 1000
+                )
+
+                rendered_html = page.content()
+
+                observations = self.parse_html(
+                    rendered_html,
+                    origin,
+                    destination,
+                    travel_date,
+                )
+
+                browser.close()
+
+            logger.info(
+                "Yatra Playwright fallback extracted "
+                f"{len(observations)} observations."
+            )
+
+            status = (
+                CollectionStatus.SUCCESS
+                if observations
+                else CollectionStatus.NO_RESULTS
+            )
+
+            return ScrapeResult(
+                source=self.source_name,
+                origin=origin,
+                destination=destination,
+                travel_date=travel_date,
+                status=status,
+                observations=observations,
+                raw_payload=rendered_html,
+            )
+
+        except Exception as err:
+            logger.exception(
+                f"Yatra Playwright fallback failed: {err}"
+            )
+
+            return ScrapeResult(
+                source=self.source_name,
+                origin=origin,
+                destination=destination,
+                travel_date=travel_date,
+                status=CollectionStatus.NETWORK_ERROR,
+                error_message=str(err),
             )
 
     def parse_html(
@@ -170,6 +463,8 @@ class YatraSource(BaseFareSource):
                 logger.debug(f"Error parsing Yatra card: {e}")
 
         return observations
+
+    
 
     def parse_json_payload(
         self,
@@ -268,13 +563,13 @@ class YatraSource(BaseFareSource):
                             departure_time=dep_time,
                             arrival_time=arr_time,
                             stops=stops,
-                            cabin_class=od.get("classtype") or "Economy",
+                            cabin_class=od.get("classtype") or self.cabin_class,
                             fare_class=fare_class,
                             base_fare=base_fare,
                             taxes=taxes,
                             user_development_fee=udf,
                             total_fare=total_fare,
-                            currency="INR",
+                            currency=self.currency,
                             availability_status="available",
                             raw_fare_text=json.dumps(fl)[:500]
                         )
@@ -300,13 +595,15 @@ class YatraSource(BaseFareSource):
             name_span = airline_el.find("span")
             raw_airline = name_span.text.strip() if name_span else strings[0]
             fl_p = airline_el.find("p", class_=re.compile(r"fl-no", re.I))
-            raw_fl = fl_p.text.strip() if fl_p else (strings[1] if len(strings) > 1 else "YT-000")
+            raw_fl = fl_p.text.strip() if fl_p else (strings[1] if len(strings) > 1 else None)
         else:
             raw_airline = strings[0]
-            raw_fl = strings[1] if len(strings) > 1 else "YT-000"
+            raw_fl = strings[1] if len(strings) > 1 else None
 
         norm_airline = DataNormalizer.normalize_airline_name(raw_airline)
         flight_num = DataNormalizer.normalize_flight_number(raw_fl, norm_airline)
+        if not flight_num:
+            return None
 
         # Times
         times = []
@@ -337,7 +634,7 @@ class YatraSource(BaseFareSource):
             clean_str = re.sub(r"[^\d.]", "", s.replace(",", ""))
             if clean_str.isdigit() and len(clean_str) >= 3:
                 val = float(clean_str)
-                if 1000 <= val <= 100000:
+                if val > 0:
                     total_fare = val
                     break
 
@@ -360,9 +657,9 @@ class YatraSource(BaseFareSource):
             departure_time=dep_time,
             arrival_time=arr_time,
             stops=stops,
-            cabin_class="Economy",
+            cabin_class=self.cabin_class,
             total_fare=total_fare,
-            currency="INR",
+            currency=self.currency,
             availability_status="available",
             raw_fare_text=card.prettify()[:500],
             missing_fields=missing

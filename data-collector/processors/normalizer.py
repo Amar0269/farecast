@@ -78,10 +78,23 @@ class DataNormalizer:
         raise ValueError(f"Invalid IATA airport code format: '{code}'")
 
     @staticmethod
-    def normalize_date(raw_date: str, target_year: int = 2026) -> str:
+    def normalize_date(raw_date: str, target_year: Optional[int] = None) -> str:
         """
         Normalizes various date formats ('17th Oct', '2026-10-17', '17-10-2026') into 'YYYY-MM-DD'.
         """
+        """
+        Normalize dates such as:
+        '17th Oct'      -> 'YYYY-10-17'
+        '17 Oct 2026'  -> '2026-10-17'
+        '17-10-2026'   -> '2026-10-17'
+        '2026-10-17'   -> '2026-10-17'
+        """
+
+        if not raw_date:
+            raise ValueError("Date cannot be empty")
+
+        if target_year is None:
+            target_year = datetime.now().year
         cleaned = str(raw_date).strip()
         
         # Already YYYY-MM-DD
@@ -98,7 +111,15 @@ class DataNormalizer:
         cleaned_str = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", cleaned, flags=re.IGNORECASE)
         for fmt in ("%d %b %Y", "%d %B %Y", "%d-%b-%Y", "%d %b", "%d-%b"):
             try:
-                dt = datetime.strptime(cleaned_str, fmt)
+                for fmt in ("%d %b", "%d-%b"):
+                    try:
+                        dt = datetime.strptime(
+                            f"{cleaned_str} {target_year}",
+                            f"{fmt} %Y"
+                        )
+                        return f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}"
+                    except ValueError:
+                        continue
                 year = dt.year if "%Y" in fmt else target_year
                 return f"{year:04d}-{dt.month:02d}-{dt.day:02d}"
             except ValueError:
@@ -134,7 +155,7 @@ class DataNormalizer:
             return None
 
     @staticmethod
-    def normalize_date_format(raw_date: str, target_year: int = 2026) -> Optional[str]:
+    def normalize_date_format(raw_date: str, target_year: Optional[int] = None) -> Optional[str]:
         """Alias for normalize_date with graceful None handling."""
         if not raw_date:
             return None
@@ -147,7 +168,7 @@ class DataNormalizer:
     def normalize_flight_number(raw_fl: str, airline: str = "") -> str:
         """Standardizes flight numbers like 'SG-8723' -> 'SG 8723', '6E-5314' -> '6E 5314'."""
         if not raw_fl:
-            return "FL-000"
+            return None
         cleaned = str(raw_fl).strip().upper().replace("-", " ")
         cleaned = re.sub(r"\s+", " ", cleaned)
         return cleaned

@@ -40,9 +40,9 @@ def load_config(config_path: str = "config/routes.yaml") -> Dict[str, Any]:
     if not os.path.exists(config_path):
         logger.warning(f"Config file {config_path} not found. Using default config.")
         return {
-            "routes": [{"origin": "DEL", "destination": "BOM"}],
+            "routes": [],
             "advance_purchase_days": [1, 7, 15, 30, 45],
-            "sources": ["indigo"]
+            "sources": ["yatra"]
         }
     with open(config_path, "r") as f:
         return yaml.safe_load(f)
@@ -138,9 +138,9 @@ def export_processed_data(
 
 
 def collect_fares(
-    source: str = "indigo",
-    origin: str = "DEL",
-    destination: str = "BOM",
+    source: str = "yatra",
+    origin: Optional[str] = None,
+    destination: Optional[str] = None,
     travel_date: Optional[str] = None,
     raw_dir: str = "data/raw",
     processed_dir: str = "data/processed"
@@ -156,7 +156,7 @@ def collect_fares(
     7. Exports CSV/JSON
     """
     if not travel_date:
-        travel_date = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+        raise ValueError("travel date must be provided explicitly")
 
     src_lower = source.lower()
     if src_lower == "indigo":
@@ -226,7 +226,7 @@ def run_matrix_collection(config_path: str = "config/routes.yaml", target_source
     run_id = f"run_{start_time.strftime('%Y%m%d_%H%M%S')}"
 
     config = load_config(config_path)
-    routes = config.get("routes", [{"origin": "DEL", "destination": "BOM"}])
+    routes = config.get("routes", [])
     advance_days = config.get("advance_purchase_days", [1, 7, 15, 30, 45])
     sources = [target_source] if target_source else config.get("sources", ["yatra"])
 
@@ -320,9 +320,9 @@ def run_matrix_collection(config_path: str = "config/routes.yaml", target_source
 
 def main():
     parser = argparse.ArgumentParser(description="MoSPI Airfare Price Index Data Collector")
-    parser.add_argument("--source", type=str, default="indigo", help="Target source (e.g. indigo, yatra, easemytrip)")
-    parser.add_argument("--origin", type=str, default="DEL", help="Origin IATA code")
-    parser.add_argument("--destination", type=str, default="BOM", help="Destination IATA code")
+    parser.add_argument("--source", type=str, default="yatra", help="Target source (e.g. indigo, yatra, easemytrip)")
+    parser.add_argument("--origin", type=str, default=None, help="Origin IATA code")
+    parser.add_argument("--destination", type=str, default=None, help="Destination IATA code")
     parser.add_argument("--travel-date", type=str, default=None, help="Travel date YYYY-MM-DD")
     parser.add_argument("--config", type=str, default="config/routes.yaml", help="Path to config file")
     parser.add_argument("--run-matrix", action="store_true", help="Run matrix collection across all routes and advance purchase dates")

@@ -28,12 +28,12 @@ def build_production_dataset(config_path: str = "config/routes.yaml") -> Dict[st
     run_id = f"run_{start_time.strftime('%Y%m%d_%H%M%S')}"
 
     config = load_config(config_path)
-    routes = config.get("routes", [{"origin": "DEL", "destination": "BOM"}])
+    routes = config.get("routes", [])
     advance_days = config.get("advance_purchase_days", [1, 7, 15, 30, 45])
     sources = ["yatra"]
 
     logger.info("Executing 30-search sampling matrix collection...")
-    yatra_adapter = YatraSource()
+    yatra_adapter = YatraSource( config.get("source_settings", {}).get("yatra", {}))
 
     all_raw_observations: List[FareObservation] = []
 
@@ -80,10 +80,12 @@ def build_production_dataset(config_path: str = "config/routes.yaml") -> Dict[st
             meta = raw_data.get("metadata", {})
             payload = raw_data.get("raw_payload", "")
             if payload and len(payload) > 1000:
-                orig = meta.get("origin", "DEL")
-                dest = meta.get("destination", "BOM")
-                t_date = meta.get("travel_date", "2026-10-17")
+                orig = meta.get("origin")
+                dest = meta.get("destination")
+                t_date = meta.get("travel_date")
                 col_ts = meta.get("collection_timestamp")
+                if not orig or not dest or t_date:
+                    logger.warning(f"Skipping raw file with incomplete metadata:{rf}")
 
                 obs_list = yatra_adapter.parse_html(payload, orig, dest, t_date)
                 for obs in obs_list:
@@ -99,7 +101,7 @@ def build_production_dataset(config_path: str = "config/routes.yaml") -> Dict[st
     # Re-tally per route, window, source counts from final clean production observations
     for obs in final_observations:
         r_key = obs.route
-        w_key = obs.advance_purchase_window or "T+30"
+        w_key = obs.advance_purchase_window or "UNKNOWN"
         s_key = obs.source.lower()
 
         per_route_counts[r_key] = per_route_counts.get(r_key, 0) + 1

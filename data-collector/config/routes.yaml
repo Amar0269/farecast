@@ -22,49 +22,54 @@ advance_purchase_days:
   - 45
 
 sources:
-  - indigo
-  - easemytrip
-  - ixigo
   - yatra
-  - airindia
-  - airindiaexpress
-  - akasa
-  - spicejet
-  - cleartrip
-  - goibibo
-  - makemytrip
+
+# source_settings:
+#   indigo:
+#     base_url: "https://www.goindigo.in"
+#     timeout_seconds: 30
+#   easemytrip:
+#     base_url: "https://www.easemytrip.com"
+#     timeout_seconds: 30
+#   ixigo:
+#     base_url: "https://www.ixigo.com"
+#     timeout_seconds: 30
+#   yatra:
+#     base_url: "https://flight.yatra.com"
+#     timeout_seconds: 30
+#   airindia:
+#     base_url: "https://www.airindia.com"
+#     timeout_seconds: 30
+#   airindiaexpress:
+#     base_url: "https://www.airindiaexpress.in"
+#     timeout_seconds: 30
+#   akasa:
+#     base_url: "https://www.akasaair.com"
+#     timeout_seconds: 30
+#   spicejet:
+#     base_url: "https://www.spicejet.com"
+#     timeout_seconds: 30
+#   cleartrip:
+#     base_url: "https://www.cleartrip.com"
+#     timeout_seconds: 30
+#   goibibo:
+#     base_url: "https://www.goibibo.com"
+#     timeout_seconds: 30
+#   makemytrip:
+#     base_url: "https://www.makemytrip.com"
+#     timeout_seconds: 30
 
 source_settings:
-  indigo:
-    base_url: "https://www.goindigo.in"
-    timeout_seconds: 30
-  easemytrip:
-    base_url: "https://www.easemytrip.com"
-    timeout_seconds: 30
-  ixigo:
-    base_url: "https://www.ixigo.com"
-    timeout_seconds: 30
   yatra:
     base_url: "https://flight.yatra.com"
-    timeout_seconds: 30
-  airindia:
-    base_url: "https://www.airindia.com"
-    timeout_seconds: 30
-  airindiaexpress:
-    base_url: "https://www.airindiaexpress.in"
-    timeout_seconds: 30
-  akasa:
-    base_url: "https://www.akasaair.com"
-    timeout_seconds: 30
-  spicejet:
-    base_url: "https://www.spicejet.com"
-    timeout_seconds: 30
-  cleartrip:
-    base_url: "https://www.cleartrip.com"
-    timeout_seconds: 30
-  goibibo:
-    base_url: "https://www.goibibo.com"
-    timeout_seconds: 30
-  makemytrip:
-    base_url: "https://www.makemytrip.com"
-    timeout_seconds: 30
+    timeout_seconds: 45
+    max_tries: 3
+    retry_backoff_seconds: 2
+    adults: 1
+    children: 0
+    infants: 0
+    cabin_class: "Economy"
+    playwright_enabled: true
+    playwright_headless: false
+    playwright_wait_seconds: 15
+    currency: "INR"
