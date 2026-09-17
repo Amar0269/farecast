@@ -33,8 +33,19 @@ def test_spicejet_parse_valid_html():
     assert obs.stops == 0
 
 
+from unittest.mock import patch, MagicMock
+
 def test_spicejet_search_blocked_response():
     scraper = SpiceJetSource()
-    result = scraper.search("DEL", "BOM", "2026-10-17")
+    
+    with patch("httpx.Client.get") as mock_get:
+        # Simulate a Cloudflare 403 block
+        mock_response = MagicMock()
+        mock_response.status_code = 403
+        mock_response.text = "403 Forbidden Cloudflare"
+        mock_get.return_value = mock_response
+        
+        result = scraper.search("DEL", "BOM", "2026-10-17")
+        
     assert result.status == CollectionStatus.SOURCE_BLOCKED
     assert "Cloudflare" in result.error_message or "JS" in result.error_message or "blocked" in result.error_message.lower()

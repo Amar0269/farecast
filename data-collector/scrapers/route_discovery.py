@@ -8,7 +8,7 @@ import csv
 import json
 import logging
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Tuple, Set
+from typing import List, Dict, Any, Tuple, Set, Optional
 
 logger = logging.getLogger("RouteDiscovery")
 
